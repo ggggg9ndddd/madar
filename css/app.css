@@ -236,6 +236,12 @@ details.story p { margin-top: 12px; max-width: 65ch; line-height: 2.05; }
 .modal { position: fixed; inset: 0; background: rgba(6, 20, 23, .55); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 50; }
 .modal-box { background: var(--surface); border-radius: 18px; padding: 26px; max-width: 440px; width: 100%; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, .3); }
 
+.lock { position: fixed; inset: 0; background: var(--bg); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.lock-box { background: var(--surface); border: 1px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); padding: 28px; width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; text-align: center; align-items: stretch; color: var(--ink); }
+.lock-box .brand-mark { width: 44px; height: 44px; margin: 0 auto; color: var(--primary); }
+.lock-box .field { text-align: center; }
+.lock-msg { color: var(--crit); font-size: .86rem; min-height: 1.6em; }
+
 /* ---------- الهاتف ---------- */
 @media (max-width: 880px) {
   .app { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }

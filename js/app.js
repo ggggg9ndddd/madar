@@ -62,7 +62,7 @@
     tasks: { items: [] },
     notes: { items: [] },
     events: { items: [] },
-    prefs: { focus: 25, short: 5, long: 15, semesterStart: '', doneEvents: [] },
+    prefs: { focus: 25, short: 5, long: 15, semesterStart: '', doneEvents: [], name: 'ناصر', lock: null },
     stats: { days: {} },
     journal: { days: {} }
   };
@@ -75,6 +75,8 @@
     if ('days' in DEFAULTS[k] && (!d.days || typeof d.days !== 'object')) d.days = {};
     if (k === 'prefs') {
       if (!Array.isArray(d.doneEvents)) d.doneEvents = [];
+      d.name = typeof d.name === 'string' ? d.name.slice(0, 40) : '';
+      if (!d.lock || typeof d.lock !== 'object' || !d.lock.hash || !d.lock.salt) d.lock = null;
       ['focus', 'short', 'long'].forEach(function (f) { d[f] = clampMin(d[f], DEFAULTS.prefs[f]); });
     }
     return d;
@@ -174,7 +176,7 @@
       userId = id;
       return pull(true);
     }).then(function (changed) {
-      if (changed && !typing()) render();
+      if (changed && !typing()) render(); else checkLock();
     }).catch(function () { remoteOK = false; setSync('local'); });
   }
   var lastPull = Date.now();
@@ -183,7 +185,7 @@
     tick();
     if (!db || !userId || !remoteOK || busy() || Date.now() - lastPull < 30000) return;
     lastPull = Date.now();
-    pull(false).then(function (changed) { if (changed && !typing()) render(); }).catch(function () { /* تبقى النسخة الحالية */ });
+    pull(false).then(function (changed) { if (changed && !typing()) render(); else checkLock(); }).catch(function () { /* تبقى النسخة الحالية */ });
   });
 
   /* ================= حالة الواجهة ================= */
@@ -463,6 +465,30 @@
     $('#memWrap').innerHTML = memHtml();
   }
 
+  /* ================= القفل بكلمة المرور ================= */
+  var unlocked = false;
+  try { unlocked = sessionStorage.getItem('madar:unlocked') === '1'; } catch (e) { /* لا تخزين للجلسة */ }
+  function weakHash(str) { var h = 5381, i; for (i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) >>> 0; return 'w:' + h.toString(16); }
+  function hashPw(pw, salt) {
+    var data = salt + ':' + pw;
+    try {
+      if (window.crypto && window.crypto.subtle && window.TextEncoder) {
+        return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(data)).then(function (buf) {
+          return 's:' + Array.prototype.map.call(new Uint8Array(buf), function (b) { return ('0' + b.toString(16)).slice(-2); }).join('');
+        }).catch(function () { return weakHash(data); });
+      }
+    } catch (e) { /* نستخدم البديل */ }
+    return Promise.resolve(weakHash(data));
+  }
+  function setUnlocked(v) { unlocked = v; try { if (v) sessionStorage.setItem('madar:unlocked', '1'); else sessionStorage.removeItem('madar:unlocked'); } catch (e) { /* لا تخزين للجلسة */ } }
+  function checkLock() {
+    var el = $('#lock'), need = !!S.prefs.lock && !unlocked;
+    if (el.hidden === !need) return;
+    el.hidden = !need;
+    $('.app').setAttribute('aria-hidden', need ? 'true' : 'false');
+    if (need) { $('#lockMsg').textContent = ''; $('#lockPw').value = ''; setTimeout(function () { try { $('#lockPw').focus(); } catch (e) { /* لا بأس */ } }, 50); }
+  }
+
   /* ================= الصفحات ================= */
   function route() {
     var h = (location.hash || '').replace('#', '');
@@ -485,7 +511,7 @@
     var upcoming = evAll.filter(function (e) { return e.date && e.end >= tk && e.type !== 'lecture' && S.prefs.doneEvents.indexOf(e.id) === -1; }).slice(0, 4);
     if (!ui.act) ui.act = pickActivity('all');
     return '<div class="page">' +
-      head(greet, 'هذا يومك. ابدأ بآية، ثم بمهمة واحدة.') +
+      head(esc(greet + (S.prefs.name.trim() ? '، ' + S.prefs.name.trim() : '')), 'هذا يومك. ابدأ بآية، ثم بمهمة واحدة.') +
       '<section class="hero"><div class="eyebrow"><span>آية اليوم</span><span>' + esc(hijri(new Date())) + '</span></div>' +
       '<p class="verse">﴿ ' + esc(v.t) + ' ﴾</p><span class="src">' + esc(v.s) + '</span>' +
       '<a href="#reflect">تأمل فيها واكتب خاطرتك</a></section>' +
@@ -510,7 +536,18 @@
       '<section class="card"><div class="card-head"><h2>نشاط لوقت الفراغ</h2><a href="#breaks">كل الأنشطة</a></div>' +
       '<p class="act-title">' + esc(ui.act.t) + '</p><p class="muted">' + esc(ui.act.d) + ' · ' + ui.act.m + ' د</p>' +
       '<div class="row"><button class="btn" data-act="new-act">اقتراح آخر</button></div></section>' +
-      '</div></div>';
+      '</div>' +
+      '<section class="card"><h2>اسمك وكلمة المرور</h2>' +
+      '<div class="row"><label class="small muted" for="prefName">الاسم الذي يظهر في التحية</label><input class="field" id="prefName" maxlength="40" value="' + esc(S.prefs.name) + '" style="max-width:260px"></div>' +
+      (S.prefs.lock
+        ? '<p class="muted small">الموقع مقفل بكلمة مرور. يطلبها عند كل فتح جديد.</p>' +
+          '<form class="row" data-form="remove-pw"><input class="field" id="pwCurrent" name="pw" type="password" autocomplete="current-password" placeholder="كلمة المرور الحالية" aria-label="كلمة المرور الحالية" style="max-width:260px">' +
+          '<button class="btn">إزالة كلمة المرور</button><button class="btn pri" type="button" data-act="lock-now">اقفل الآن</button></form>'
+        : '<p class="muted small">اختر كلمة مرور يطلبها الموقع عند كل فتح. هي قفل للشاشة يمنع من يمسك جهازك من تصفح مهامك وملاحظاتك.</p>' +
+          '<form class="row" data-form="set-pw"><input class="field" id="pwNew" name="pw" type="password" autocomplete="new-password" minlength="4" maxlength="64" placeholder="كلمة مرور جديدة" aria-label="كلمة مرور جديدة" style="max-width:220px">' +
+          '<input class="field" id="pwNew2" name="pw2" type="password" autocomplete="new-password" maxlength="64" placeholder="أعدها للتأكيد" aria-label="تأكيد كلمة المرور" style="max-width:220px">' +
+          '<button class="btn pri">تفعيل القفل</button></form>') +
+      '</section></div>';
   };
 
   PAGES.schedule = function () {
@@ -732,6 +769,7 @@
     $('#topDate').textContent = fmt(new Date(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
     $('#view').innerHTML = PAGES[r]();
     paintTimer();
+    checkLock();
   }
   function rerenderKeepScroll() { var v = $('#view'), s = v.scrollTop; render(); v.scrollTop = s; }
 
@@ -759,6 +797,7 @@
         save('events'); rerenderKeepScroll(); break;
       case 'sched-mode': ui.schedMode = el.getAttribute('data-mode'); rerenderKeepScroll(); break;
       case 'sched-course': ui.schedCourse = el.getAttribute('data-course'); rerenderKeepScroll(); break;
+      case 'lock-now': setUnlocked(false); checkLock(); break;
       case 'graded-only': ui.gradedOnly = !ui.gradedOnly; rerenderKeepScroll(); break;
       case 'toggle-past': ui.showPast = !ui.showPast; render(); break;
       case 'timer-toggle': if (T.running) pauseTimer(); else startTimer(); break;
@@ -810,6 +849,35 @@
     if (!f) return;
     ev.preventDefault();
     var kind = f.getAttribute('data-form');
+    if (kind === 'unlock') {
+      var lk = S.prefs.lock, pwIn = $('#lockPw');
+      if (!lk) { setUnlocked(true); checkLock(); return; }
+      hashPw(pwIn.value, lk.salt).then(function (h) {
+        if (h === lk.hash) { setUnlocked(true); pwIn.value = ''; checkLock(); $('#view').focus(); }
+        else { $('#lockMsg').textContent = 'كلمة المرور غير صحيحة. حاول مرة أخرى.'; pwIn.value = ''; pwIn.focus(); }
+      });
+      return;
+    }
+    if (kind === 'set-pw') {
+      var p1 = f.elements.pw.value, p2 = f.elements.pw2.value;
+      if (p1.length < 4) { toast('كلمة المرور قصيرة. اكتب 4 خانات على الأقل.'); return; }
+      if (p1 !== p2) { toast('الكلمتان غير متطابقتين. أعد كتابتهما.'); return; }
+      var salt = uid() + uid();
+      hashPw(p1, salt).then(function (h) {
+        S.prefs.lock = { salt: salt, hash: h }; save('prefs'); setUnlocked(true); rerenderKeepScroll();
+        toast('تم تفعيل القفل. سيطلب الموقع كلمة المرور عند الفتح القادم.');
+      });
+      return;
+    }
+    if (kind === 'remove-pw') {
+      var cur = S.prefs.lock;
+      if (!cur) return;
+      hashPw(f.elements.pw.value, cur.salt).then(function (h) {
+        if (h !== cur.hash) { toast('كلمة المرور الحالية غير صحيحة.'); return; }
+        S.prefs.lock = null; save('prefs'); rerenderKeepScroll(); toast('أزيلت كلمة المرور.');
+      });
+      return;
+    }
     if (kind === 'task') {
       var inp = f.querySelector('input[name="title"]'), inputId = inp.id;
       if (!addTask(inp.value, f.getAttribute('data-scope'))) { toast('اكتب المهمة أولا.'); inp.focus(); return; }
@@ -861,6 +929,8 @@
     } else if (el.id === 'semStart') {
       S.prefs.semesterStart = validYmd(el.value) ? el.value : '';
       save('prefs'); rerenderKeepScroll();
+    } else if (el.id === 'prefName') {
+      S.prefs.name = el.value.trim().slice(0, 40); save('prefs'); rerenderKeepScroll();
     } else if (el.id === 'focusTask') {
       T.task = el.value;
     }
